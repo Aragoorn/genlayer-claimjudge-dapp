@@ -1,3 +1,6 @@
+<img width="1920" height="907" alt="demo" src="https://github.com/user-attachments/assets/e676bcba-5530-45b0-8844-2d9496492361" />
+<img width="1920" height="857" alt="deploy" src="https://github.com/user-attachments/assets/c63ae791-1b2f-4ddc-b242-fba70f05f863" />
+<img width="1920" height="887" alt="test" src="https://github.com/user-attachments/assets/4581f666-5008-4b55-9971-d7aefc644df3" />
 # ClaimJudge – AI-Powered Decentralized Claim & Dispute Resolver
 
 **An advanced Intelligent Contract on GenLayer that uses AI consensus to fairly judge real-world claims and disputes.**
@@ -19,6 +22,12 @@ Anyone can submit a claim (freelance work, bounty completion, delivery disputes,
 
 ## Contract Address
 `0x112f563F4DE1d981f0538A456Ea58C81cF93B73C`
+
+## How to run the frontend
+```bash
+cd frontend
+npm install
+npm run dev
 
 ## How to Use (GenLayer Studio)
 
