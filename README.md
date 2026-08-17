@@ -74,5 +74,8 @@ Payable escrow integration
 Multi-party disputes
 Reputation system based on past judgments
 
+Project Structure/contracts → Intelligent Contract source
+/frontend → Full dApp
+
 Built with  for GenLayer
 This project showcases real adjudication use-cases that were previously impossible on traditional blockchains.
