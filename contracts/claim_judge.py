@@ -2,13 +2,12 @@
 
 from genlayer import *
 import json
-import typing
 from datetime import datetime, timezone
 
 class ClaimJudge(gl.Contract):
     """
     ClaimJudge – Advanced AI-Powered Decentralized Claim & Dispute Resolver
-    Final stable version – designed for reliable consensus on GenLayer
+    Fixed version addressing steward feedback
     """
 
     claim_counter: u256
@@ -20,9 +19,9 @@ class ClaimJudge(gl.Contract):
     def __init__(self):
         self.claim_counter = u256(0)
         self.resolved_count = u256(0)
-        self.claims = TreeMap()
-        self.resolutions = TreeMap()
-        self.challenges = TreeMap()
+        self.claims = TreeMap[u256, str]()
+        self.resolutions = TreeMap[u256, str]()
+        self.challenges = TreeMap[u256, str]()
 
     @gl.public.write
     def create_claim(self, title: str, description: str, evidence_urls: str) -> u256:
@@ -41,7 +40,7 @@ class ClaimJudge(gl.Contract):
             "updated_at": now
         }
         self.claims[claim_id] = json.dumps(claim_data, sort_keys=True)
-        return claim_id
+        return claim_id          # مستقیم ID را برمی‌گرداند
 
     @gl.public.write
     def add_evidence(self, claim_id: u256, extra_urls: str) -> str:
@@ -50,14 +49,14 @@ class ClaimJudge(gl.Contract):
             return json.dumps({"error": "Claim not found"})
 
         claim = json.loads(claim_str)
-        if claim["status"] != "open":
-            return json.dumps({"error": "Claim already resolved"})
+        if claim["status"] not in ["open", "challenged"]:
+            return json.dumps({"error": "Claim cannot accept new evidence"})
 
         existing = claim.get("evidence_urls", "")
         claim["evidence_urls"] = (existing + "," + extra_urls.strip()) if existing else extra_urls.strip()
         claim["updated_at"] = datetime.now(timezone.utc).isoformat()
         self.claims[claim_id] = json.dumps(claim, sort_keys=True)
-        return json.dumps({"success": True})
+        return json.dumps({"success": True, "claim_id": int(claim_id)})
 
     @gl.public.write
     def resolve_claim(self, claim_id: u256) -> str:
@@ -65,12 +64,14 @@ class ClaimJudge(gl.Contract):
         if not claim_str:
             return json.dumps({"error": "Claim does not exist"})
 
-        if claim_id in self.resolutions:
-            return self.resolutions[claim_id]
-
         claim = json.loads(claim_str)
 
-        # ===== Reliable LLM consensus using prompt_non_comparative =====
+        # اجازه resolve مجدد بعد از challenge
+        if claim["status"] not in ["open", "challenged"]:
+            if claim_id in self.resolutions:
+                return self.resolutions[claim_id]
+            return json.dumps({"error": "Claim already finalized"})
+
         def get_input() -> str:
             evidence = claim.get("evidence_urls", "None provided")
             return f"""Title: {claim['title']}
@@ -109,7 +110,10 @@ It must be a single word with no extra text, punctuation or explanation.
         claim["status"] = "resolved"
         claim["updated_at"] = now
         self.claims[claim_id] = json.dumps(claim, sort_keys=True)
-        self.resolved_count = self.resolved_count + u256(1)
+
+        # فقط بار اول شمارش شود
+        if claim_id not in self.resolutions or claim.get("status") != "resolved":
+            self.resolved_count += u256(1)
 
         return json.dumps(resolution, sort_keys=True)
 
@@ -117,14 +121,32 @@ It must be a single word with no extra text, punctuation or explanation.
     def challenge_resolution(self, claim_id: u256, reason: str) -> str:
         if claim_id not in self.resolutions:
             return json.dumps({"error": "No resolution to challenge"})
+
+        claim_str = self.claims.get(claim_id, "")
+        if not claim_str:
+            return json.dumps({"error": "Claim not found"})
+
+        claim = json.loads(claim_str)
+
+        # وضعیت را به challenged تغییر می‌دهیم تا قابل reassessment باشد
+        claim["status"] = "challenged"
+        claim["updated_at"] = datetime.now(timezone.utc).isoformat()
+        self.claims[claim_id] = json.dumps(claim, sort_keys=True)
+
         challenge = {
             "claim_id": int(claim_id),
             "challenger": str(gl.message.sender_address),
             "reason": reason.strip(),
-            "challenged_at": datetime.now(timezone.utc).isoformat()
+            "challenged_at": datetime.now(timezone.utc).isoformat(),
+            "previous_decision": json.loads(self.resolutions[claim_id]).get("decision", "")
         }
         self.challenges[claim_id] = json.dumps(challenge, sort_keys=True)
-        return json.dumps({"success": True})
+
+        return json.dumps({
+            "success": True,
+            "message": "Claim challenged. It can now be re-resolved.",
+            "claim_id": int(claim_id)
+        })
 
     @gl.public.view
     def get_claim(self, claim_id: u256) -> str:
