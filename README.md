@@ -1,9 +1,20 @@
-<img width="1920" height="907" alt="demo" src="https://github.com/user-attachments/assets/e676bcba-5530-45b0-8844-2d9496492361" />
-<img width="1920" height="857" alt="deploy" src="https://github.com/user-attachments/assets/c63ae791-1b2f-4ddc-b242-fba70f05f863" />
-<img width="1920" height="887" alt="test" src="https://github.com/user-attachments/assets/4581f666-5008-4b55-9971-d7aefc644df3" />
+<img width="1920" height="860" alt="Screenshot (2725)" src="https://github.com/user-attachments/assets/472963b6-be07-4dfa-868d-bba75b37ce18" />
+<img width="1920" height="870" alt="Screenshot (2724)" src="https://github.com/user-attachments/assets/de8bdeb4-4def-4308-9cdf-68958246c72a" />
+<img width="1920" height="869" alt="Screenshot (2723)" src="https://github.com/user-attachments/assets/fbfdd24d-933b-430b-a1ac-d6013a80f2ee" />
+<img width="1920" height="875" alt="test" src="https://github.com/user-attachments/assets/8ffb0612-35f0-4b5a-a7c0-e8908b6a0cd0" />
+<img width="1920" height="878" alt="deploy" src="https://github.com/user-attachments/assets/e1334068-1fca-4023-a8de-4edf3c736929" />
+
 # ClaimJudge – AI-Powered Decentralized Claim & Dispute Resolver
 
 **An advanced Intelligent Contract on GenLayer that uses AI consensus to fairly judge real-world claims and disputes.**
+## contract address : 0x80106fce8631cA0A8D98b1666810F605888Bf73a
+https://explorer-studio.genlayer.com/tx/0xe7134348faa415bc0ea6872e8424f35b8ab359d0d6dd8f921889e866dc61d75e 
+https://explorer-studio.genlayer.com/address/0x80106fce8631cA0A8D98b1666810F605888Bf73a 
+https://explorer-studio.genlayer.com/tx/0x8c9fb75b1121fee7aab9a79c5a5506d667d157f00496265ca6bd0aa99e20cc8f 
+https://explorer-studio.genlayer.com/tx/0x227352d9d3b25d915eaf936a8640e41d47dbf72cdde79e2d60025511b3054cd9 
+https://explorer-studio.genlayer.com/tx/0x6e377ce8a3d000e9c1ef06471e998fa779d3225dd80c6f466cac59033b7f464d 
+https://explorer-studio.genlayer.com/tx/0xff2417a203cf6e88e6ba86792d6639b5ffb2330fc28e21cf9763bc51ce20305b
+
 
 ## live demo :
 https://claimjudge-genlayer.netlify.app/
@@ -24,7 +35,7 @@ Anyone can submit a claim (freelance work, bounty completion, delivery disputes,
 - Clean, production-ready Python code with proper storage patterns
 
 ## Contract Address
-`0x112f563F4DE1d981f0538A456Ea58C81cF93B73C`
+0x80106fce8631cA0A8D98b1666810F605888Bf73a
 
 ## How to run the frontend
 ```bash
