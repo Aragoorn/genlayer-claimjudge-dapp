@@ -5,6 +5,9 @@
 
 **An advanced Intelligent Contract on GenLayer that uses AI consensus to fairly judge real-world claims and disputes.**
 
+## live demo :
+https://claimjudge-genlayer.netlify.app/
+
 Built for the GenLayer Builders Program – August 2026.
 
 ## Overview
