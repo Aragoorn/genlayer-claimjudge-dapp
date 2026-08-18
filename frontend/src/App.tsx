@@ -3,7 +3,7 @@ import { createClient, createAccount } from 'genlayer-js'
 import { studionet } from 'genlayer-js/chains'
 import { TransactionStatus } from 'genlayer-js/types'
 
-const CONTRACT = '0x112f563F4DE1d981f0538A456Ea58C81cF93B73C'
+const CONTRACT = '0x80106fce8631cA0A8D98b1666810F605888Bf73a'
 
 const account = createAccount()
 const client = createClient({
@@ -16,7 +16,10 @@ export default function App() {
   const [description, setDescription] = useState('')
   const [evidence, setEvidence] = useState('')
   const [claimId, setClaimId] = useState<number | null>(null)
+  const [extraEvidence, setExtraEvidence] = useState('')
+  const [challengeReason, setChallengeReason] = useState('')
   const [resolution, setResolution] = useState<any>(null)
+  const [challenge, setChallenge] = useState<any>(null)
   const [stats, setStats] = useState<any>(null)
   const [status, setStatus] = useState('Initializing...')
   const [loading, setLoading] = useState(false)
@@ -30,8 +33,7 @@ export default function App() {
         setStatus('Ready')
         await loadStats()
       } catch (err: any) {
-        console.error(err)
-        setStatus('Initialization failed: ' + (err.message || err))
+        setStatus('Init failed: ' + (err.message || err))
       }
     }
     init()
@@ -45,55 +47,56 @@ export default function App() {
         args: [],
       })
       setStats(JSON.parse(res as string))
-    } catch (err) {
-      console.error('Stats error:', err)
-    }
+    } catch {}
   }
 
   const createClaim = async () => {
-    if (!title.trim() || !description.trim()) {
-      alert('Title and Description are required')
-      return
-    }
-    if (!ready) {
-      alert('Client is not ready yet')
-      return
-    }
-
+    if (!title.trim() || !description.trim()) return alert('Title & Description required')
     setLoading(true)
     setStatus('Creating claim...')
-
     try {
       await client.initializeConsensusSmartContract()
-
       const hash = await client.writeContract({
         address: CONTRACT,
         functionName: 'create_claim',
         args: [title.trim(), description.trim(), evidence.trim() || ''],
         value: 0n,
       })
-
-      setStatus('Waiting for transaction to be FINALIZED...')
-      await client.waitForTransactionReceipt({
+      setStatus('Waiting for FINALIZED...')
+      const receipt = await client.waitForTransactionReceipt({
         hash,
         status: TransactionStatus.FINALIZED,
-        retries: 120,
+        retries: 100,
         interval: 3000,
       })
-
-      const count = await client.readContract({
-        address: CONTRACT,
-        functionName: 'get_claim_count',
-        args: [],
-      })
-
-      const newId = Number(count) - 1
+      // استفاده مستقیم از مقدار برگشتی (نه از count)
+      const newId = Number(receipt.executionResult || 0)
       setClaimId(newId)
-      setStatus(`Claim #${newId} created successfully!`)
+      setStatus(`Claim #${newId} created`)
       await loadStats()
     } catch (err: any) {
-      console.error(err)
-      setStatus('Error: ' + (err?.message || err?.shortMessage || JSON.stringify(err)))
+      setStatus('Error: ' + (err?.message || JSON.stringify(err)))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const addEvidence = async () => {
+    if (claimId === null || !extraEvidence.trim()) return
+    setLoading(true)
+    setStatus('Adding evidence...')
+    try {
+      await client.initializeConsensusSmartContract()
+      const hash = await client.writeContract({
+        address: CONTRACT,
+        functionName: 'add_evidence',
+        args: [claimId, extraEvidence.trim()],
+        value: 0n,
+      })
+      await client.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, retries: 80 })
+      setStatus('Evidence added')
+    } catch (err: any) {
+      setStatus('Error: ' + (err?.message || err))
     } finally {
       setLoading(false)
     }
@@ -101,45 +104,54 @@ export default function App() {
 
   const resolveClaim = async () => {
     if (claimId === null) return
-    if (!ready) {
-      alert('Client is not ready yet')
-      return
-    }
-
     setLoading(true)
-    setStatus('AI is judging the claim... This can take 40–90 seconds')
-
+    setStatus('AI judging... (30-90s)')
     try {
       await client.initializeConsensusSmartContract()
-
       const hash = await client.writeContract({
         address: CONTRACT,
         functionName: 'resolve_claim',
         args: [claimId],
         value: 0n,
       })
-
-      setStatus('Waiting for FINALIZED (AI consensus in progress)...')
-      await client.waitForTransactionReceipt({
-        hash,
-        status: TransactionStatus.FINALIZED,
-        retries: 180,
-        interval: 4000,
-      })
-
+      await client.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, retries: 150, interval: 4000 })
       const res = await client.readContract({
         address: CONTRACT,
         functionName: 'get_resolution',
         args: [claimId],
       })
-
-      const parsed = JSON.parse(res as string)
-      setResolution(parsed)
-      setStatus('Resolved successfully!')
+      setResolution(JSON.parse(res as string))
+      setStatus('Resolved')
       await loadStats()
     } catch (err: any) {
-      console.error(err)
-      setStatus('Error: ' + (err?.message || err?.shortMessage || JSON.stringify(err)))
+      setStatus('Error: ' + (err?.message || err))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const challengeClaim = async () => {
+    if (claimId === null || !challengeReason.trim()) return
+    setLoading(true)
+    setStatus('Challenging...')
+    try {
+      await client.initializeConsensusSmartContract()
+      const hash = await client.writeContract({
+        address: CONTRACT,
+        functionName: 'challenge_resolution',
+        args: [claimId, challengeReason.trim()],
+        value: 0n,
+      })
+      await client.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, retries: 80 })
+      const res = await client.readContract({
+        address: CONTRACT,
+        functionName: 'get_challenge',
+        args: [claimId],
+      })
+      setChallenge(JSON.parse(res as string))
+      setStatus('Challenged – can be re-resolved')
+    } catch (err: any) {
+      setStatus('Error: ' + (err?.message || err))
     } finally {
       setLoading(false)
     }
@@ -147,16 +159,14 @@ export default function App() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-12">
-      {/* Header */}
       <div className="text-center mb-10">
-        <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+        <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
           ClaimJudge
         </h1>
-        <p className="text-gray-300 mt-2">AI-Powered Decentralized Claim Resolver on GenLayer</p>
+        <p className="text-gray-300 mt-2">AI-Powered Decentralized Claim Resolver</p>
         <p className="text-xs text-gray-500 mt-1 break-all">{CONTRACT}</p>
       </div>
 
-      {/* Stats */}
       {stats && (
         <div className="grid grid-cols-3 gap-4 mb-8">
           <div className="bg-white/5 rounded-2xl p-4 text-center border border-white/10">
@@ -174,75 +184,64 @@ export default function App() {
         </div>
       )}
 
-      {/* Create Claim */}
+      {/* Create */}
       <div className="bg-white/5 rounded-2xl p-6 border border-white/10 mb-6">
-        <h2 className="text-xl font-semibold mb-4">Create Claim</h2>
-        <input
-          className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-500"
-          placeholder="Title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-        />
-        <textarea
-          className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-3 focus:outline-none focus:border-indigo-500"
-          rows={4}
-          placeholder="Description"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-        />
-        <input
-          className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-4 focus:outline-none focus:border-indigo-500"
-          placeholder="Evidence URLs (optional)"
-          value={evidence}
-          onChange={(e) => setEvidence(e.target.value)}
-        />
-        <button
-          onClick={createClaim}
-          disabled={loading || !ready}
-          className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 py-3 rounded-xl font-semibold disabled:opacity-50 transition"
-        >
+        <h2 className="text-xl font-semibold mb-4">1. Create Claim</h2>
+        <input className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-3" placeholder="Title" value={title} onChange={e => setTitle(e.target.value)} />
+        <textarea className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-3" rows={3} placeholder="Description" value={description} onChange={e => setDescription(e.target.value)} />
+        <input className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-4" placeholder="Evidence URLs (optional)" value={evidence} onChange={e => setEvidence(e.target.value)} />
+        <button onClick={createClaim} disabled={loading || !ready} className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 py-3 rounded-xl font-semibold disabled:opacity-50">
           {loading ? 'Processing...' : 'Create Claim'}
         </button>
       </div>
 
-      {/* Resolve */}
       {claimId !== null && (
-        <div className="bg-white/5 rounded-2xl p-6 border border-white/10 mb-6">
-          <h2 className="text-xl font-semibold mb-4">Claim #{claimId}</h2>
-          <button
-            onClick={resolveClaim}
-            disabled={loading || !ready}
-            className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 py-3 rounded-xl font-semibold disabled:opacity-50 transition"
-          >
-            {loading ? 'AI Judging...' : 'Resolve with AI'}
-          </button>
-        </div>
+        <>
+          {/* Add Evidence */}
+          <div className="bg-white/5 rounded-2xl p-6 border border-white/10 mb-6">
+            <h2 className="text-xl font-semibold mb-4">2. Add Evidence (Claim #{claimId})</h2>
+            <input className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-4" placeholder="Extra evidence URLs" value={extraEvidence} onChange={e => setExtraEvidence(e.target.value)} />
+            <button onClick={addEvidence} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-semibold disabled:opacity-50">
+              Add Evidence
+            </button>
+          </div>
+
+          {/* Resolve */}
+          <div className="bg-white/5 rounded-2xl p-6 border border-white/10 mb-6">
+            <h2 className="text-xl font-semibold mb-4">3. Resolve with AI</h2>
+            <button onClick={resolveClaim} disabled={loading} className="w-full bg-gradient-to-r from-green-500 to-emerald-600 py-3 rounded-xl font-semibold disabled:opacity-50">
+              {loading ? 'AI Judging...' : 'Resolve Claim'}
+            </button>
+          </div>
+
+          {/* Challenge */}
+          <div className="bg-white/5 rounded-2xl p-6 border border-white/10 mb-6">
+            <h2 className="text-xl font-semibold mb-4">4. Challenge Resolution</h2>
+            <textarea className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-4" rows={2} placeholder="Reason for challenge" value={challengeReason} onChange={e => setChallengeReason(e.target.value)} />
+            <button onClick={challengeClaim} disabled={loading} className="w-full bg-orange-600 hover:bg-orange-700 py-3 rounded-xl font-semibold disabled:opacity-50">
+              Challenge & Request Reassessment
+            </button>
+          </div>
+        </>
       )}
 
-      {/* Result */}
       {resolution && (
-        <div className="bg-white/5 rounded-2xl p-6 border border-green-500/40">
-          <h2 className="text-xl font-semibold text-green-400 mb-4">AI Resolution</h2>
-          <p>
-            <span className="text-gray-400">Decision:</span>{' '}
-            <strong className="text-green-400 text-lg">{resolution.decision}</strong>
-          </p>
-          <p className="mt-2">
-            <span className="text-gray-400">Confidence:</span> {resolution.confidence}%
-          </p>
-          <p className="mt-2">
-            <span className="text-gray-400">Summary:</span> {resolution.summary}
-          </p>
-          <p className="mt-2">
-            <span className="text-gray-400">Reasoning:</span> {resolution.reasoning}
-          </p>
+        <div className="bg-white/5 rounded-2xl p-6 border border-green-500/40 mb-6">
+          <h2 className="text-xl font-semibold text-green-400 mb-3">Resolution</h2>
+          <p><span className="text-gray-400">Decision:</span> <strong>{resolution.decision}</strong></p>
+          <p className="mt-1"><span className="text-gray-400">Summary:</span> {resolution.summary}</p>
         </div>
       )}
 
-      {/* Status */}
-      {status && (
-        <p className="text-center mt-8 text-gray-300 text-sm">{status}</p>
+      {challenge && (
+        <div className="bg-white/5 rounded-2xl p-6 border border-orange-500/40">
+          <h2 className="text-xl font-semibold text-orange-400 mb-3">Challenge</h2>
+          <p><span className="text-gray-400">Reason:</span> {challenge.reason}</p>
+          <p className="mt-1 text-sm text-gray-400">Status changed to "challenged" – can be re-resolved</p>
+        </div>
       )}
+
+      <p className="text-center mt-8 text-gray-400 text-sm">{status}</p>
     </div>
   )
 }
