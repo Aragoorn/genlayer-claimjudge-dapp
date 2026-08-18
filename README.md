@@ -17,7 +17,7 @@ https://explorer-studio.genlayer.com/tx/0xff2417a203cf6e88e6ba86792d6639b5ffb233
 
 
 ## live demo :
-https://claimjudge-genlayer.netlify.app/
+[https://claimjudge-genlayer.netlify.app/](https://agent-6a84b72b0e9994187bd767--strong-pony-776285.netlify.app/)
 
 Built for the GenLayer Builders Program – August 2026.
 
