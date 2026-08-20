@@ -3,7 +3,7 @@ import { createClient, createAccount } from 'genlayer-js'
 import { studionet } from 'genlayer-js/chains'
 import { TransactionStatus } from 'genlayer-js/types'
 
-const CONTRACT = '0x80106fce8631cA0A8D98b1666810F605888Bf73a'
+const CONTRACT = '0x8A8B387C84552863c077C3085dF719E6DA42d673'
 
 const account = createAccount()
 const client = createClient({
@@ -20,6 +20,7 @@ export default function App() {
   const [challengeReason, setChallengeReason] = useState('')
   const [resolution, setResolution] = useState<any>(null)
   const [challenge, setChallenge] = useState<any>(null)
+  const [history, setHistory] = useState<any[]>([])
   const [stats, setStats] = useState<any>(null)
   const [status, setStatus] = useState('Initializing...')
   const [loading, setLoading] = useState(false)
@@ -50,6 +51,22 @@ export default function App() {
     } catch {}
   }
 
+  // ===== اصلاح اصلی Receipt Handling =====
+  const getReturnValue = (receipt: any): number => {
+    // پشتیبانی از ساختارهای مختلف genlayer-js
+    if (receipt?.executionResult !== undefined && receipt.executionResult !== null) {
+      return Number(receipt.executionResult)
+    }
+    if (receipt?.result !== undefined && receipt.result !== null) {
+      return Number(receipt.result)
+    }
+    if (receipt?.data !== undefined && receipt.data !== null) {
+      return Number(receipt.data)
+    }
+    // fallback: خواندن از قرارداد
+    return -1
+  }
+
   const createClaim = async () => {
     if (!title.trim() || !description.trim()) return alert('Title & Description required')
     setLoading(true)
@@ -62,17 +79,29 @@ export default function App() {
         args: [title.trim(), description.trim(), evidence.trim() || ''],
         value: 0n,
       })
+
       setStatus('Waiting for FINALIZED...')
       const receipt = await client.waitForTransactionReceipt({
         hash,
         status: TransactionStatus.FINALIZED,
-        retries: 100,
+        retries: 120,
         interval: 3000,
       })
-      // استفاده مستقیم از مقدار برگشتی (نه از count)
-      const newId = Number(receipt.executionResult || 0)
+
+      let newId = getReturnValue(receipt)
+
+      // اگر از receipt نتوانستیم بخوانیم، از قرارداد می‌خوانیم
+      if (newId < 0) {
+        const count = await client.readContract({
+          address: CONTRACT,
+          functionName: 'get_claim_count',
+          args: [],
+        })
+        newId = Number(count) - 1
+      }
+
       setClaimId(newId)
-      setStatus(`Claim #${newId} created`)
+      setStatus(`Claim #${newId} created successfully`)
       await loadStats()
     } catch (err: any) {
       setStatus('Error: ' + (err?.message || JSON.stringify(err)))
@@ -93,8 +122,13 @@ export default function App() {
         args: [claimId, extraEvidence.trim()],
         value: 0n,
       })
-      await client.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, retries: 80 })
-      setStatus('Evidence added')
+      await client.waitForTransactionReceipt({
+        hash,
+        status: TransactionStatus.FINALIZED,
+        retries: 80,
+        interval: 3000,
+      })
+      setStatus('Evidence added successfully')
     } catch (err: any) {
       setStatus('Error: ' + (err?.message || err))
     } finally {
@@ -105,7 +139,7 @@ export default function App() {
   const resolveClaim = async () => {
     if (claimId === null) return
     setLoading(true)
-    setStatus('AI judging... (30-90s)')
+    setStatus('AI judging... (this may take 30-90 seconds)')
     try {
       await client.initializeConsensusSmartContract()
       const hash = await client.writeContract({
@@ -114,14 +148,31 @@ export default function App() {
         args: [claimId],
         value: 0n,
       })
-      await client.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, retries: 150, interval: 4000 })
+      await client.waitForTransactionReceipt({
+        hash,
+        status: TransactionStatus.FINALIZED,
+        retries: 180,
+        interval: 4000,
+      })
+
       const res = await client.readContract({
         address: CONTRACT,
         functionName: 'get_resolution',
         args: [claimId],
       })
       setResolution(JSON.parse(res as string))
-      setStatus('Resolved')
+
+      // خواندن تاریخچه
+      try {
+        const hist = await client.readContract({
+          address: CONTRACT,
+          functionName: 'get_history',
+          args: [claimId],
+        })
+        setHistory(JSON.parse(hist as string))
+      } catch {}
+
+      setStatus('Claim resolved')
       await loadStats()
     } catch (err: any) {
       setStatus('Error: ' + (err?.message || err))
@@ -133,7 +184,7 @@ export default function App() {
   const challengeClaim = async () => {
     if (claimId === null || !challengeReason.trim()) return
     setLoading(true)
-    setStatus('Challenging...')
+    setStatus('Submitting challenge...')
     try {
       await client.initializeConsensusSmartContract()
       const hash = await client.writeContract({
@@ -142,14 +193,20 @@ export default function App() {
         args: [claimId, challengeReason.trim()],
         value: 0n,
       })
-      await client.waitForTransactionReceipt({ hash, status: TransactionStatus.FINALIZED, retries: 80 })
+      await client.waitForTransactionReceipt({
+        hash,
+        status: TransactionStatus.FINALIZED,
+        retries: 80,
+        interval: 3000,
+      })
+
       const res = await client.readContract({
         address: CONTRACT,
         functionName: 'get_challenge',
         args: [claimId],
       })
       setChallenge(JSON.parse(res as string))
-      setStatus('Challenged – can be re-resolved')
+      setStatus('Challenged successfully – you can now re-resolve')
     } catch (err: any) {
       setStatus('Error: ' + (err?.message || err))
     } finally {
@@ -163,7 +220,7 @@ export default function App() {
         <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
           ClaimJudge
         </h1>
-        <p className="text-gray-300 mt-2">AI-Powered Decentralized Claim Resolver</p>
+        <p className="text-gray-300 mt-2">AI-Powered Decentralized Claim & Dispute Resolver</p>
         <p className="text-xs text-gray-500 mt-1 break-all">{CONTRACT}</p>
       </div>
 
@@ -187,38 +244,78 @@ export default function App() {
       {/* Create */}
       <div className="bg-white/5 rounded-2xl p-6 border border-white/10 mb-6">
         <h2 className="text-xl font-semibold mb-4">1. Create Claim</h2>
-        <input className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-3" placeholder="Title" value={title} onChange={e => setTitle(e.target.value)} />
-        <textarea className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-3" rows={3} placeholder="Description" value={description} onChange={e => setDescription(e.target.value)} />
-        <input className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-4" placeholder="Evidence URLs (optional)" value={evidence} onChange={e => setEvidence(e.target.value)} />
-        <button onClick={createClaim} disabled={loading || !ready} className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 py-3 rounded-xl font-semibold disabled:opacity-50">
+        <input
+          className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-3"
+          placeholder="Title"
+          value={title}
+          onChange={e => setTitle(e.target.value)}
+        />
+        <textarea
+          className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-3"
+          rows={3}
+          placeholder="Description"
+          value={description}
+          onChange={e => setDescription(e.target.value)}
+        />
+        <input
+          className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-4"
+          placeholder="Evidence URLs (optional)"
+          value={evidence}
+          onChange={e => setEvidence(e.target.value)}
+        />
+        <button
+          onClick={createClaim}
+          disabled={loading || !ready}
+          className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 py-3 rounded-xl font-semibold disabled:opacity-50"
+        >
           {loading ? 'Processing...' : 'Create Claim'}
         </button>
       </div>
 
       {claimId !== null && (
         <>
-          {/* Add Evidence */}
           <div className="bg-white/5 rounded-2xl p-6 border border-white/10 mb-6">
             <h2 className="text-xl font-semibold mb-4">2. Add Evidence (Claim #{claimId})</h2>
-            <input className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-4" placeholder="Extra evidence URLs" value={extraEvidence} onChange={e => setExtraEvidence(e.target.value)} />
-            <button onClick={addEvidence} disabled={loading} className="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-semibold disabled:opacity-50">
+            <input
+              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-4"
+              placeholder="Extra evidence URLs"
+              value={extraEvidence}
+              onChange={e => setExtraEvidence(e.target.value)}
+            />
+            <button
+              onClick={addEvidence}
+              disabled={loading}
+              className="w-full bg-blue-600 hover:bg-blue-700 py-3 rounded-xl font-semibold disabled:opacity-50"
+            >
               Add Evidence
             </button>
           </div>
 
-          {/* Resolve */}
           <div className="bg-white/5 rounded-2xl p-6 border border-white/10 mb-6">
             <h2 className="text-xl font-semibold mb-4">3. Resolve with AI</h2>
-            <button onClick={resolveClaim} disabled={loading} className="w-full bg-gradient-to-r from-green-500 to-emerald-600 py-3 rounded-xl font-semibold disabled:opacity-50">
+            <button
+              onClick={resolveClaim}
+              disabled={loading}
+              className="w-full bg-gradient-to-r from-green-500 to-emerald-600 py-3 rounded-xl font-semibold disabled:opacity-50"
+            >
               {loading ? 'AI Judging...' : 'Resolve Claim'}
             </button>
           </div>
 
-          {/* Challenge */}
           <div className="bg-white/5 rounded-2xl p-6 border border-white/10 mb-6">
             <h2 className="text-xl font-semibold mb-4">4. Challenge Resolution</h2>
-            <textarea className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-4" rows={2} placeholder="Reason for challenge" value={challengeReason} onChange={e => setChallengeReason(e.target.value)} />
-            <button onClick={challengeClaim} disabled={loading} className="w-full bg-orange-600 hover:bg-orange-700 py-3 rounded-xl font-semibold disabled:opacity-50">
+            <textarea
+              className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 mb-4"
+              rows={2}
+              placeholder="Reason for challenge (min 10 characters)"
+              value={challengeReason}
+              onChange={e => setChallengeReason(e.target.value)}
+            />
+            <button
+              onClick={challengeClaim}
+              disabled={loading}
+              className="w-full bg-orange-600 hover:bg-orange-700 py-3 rounded-xl font-semibold disabled:opacity-50"
+            >
               Challenge & Request Reassessment
             </button>
           </div>
@@ -227,9 +324,23 @@ export default function App() {
 
       {resolution && (
         <div className="bg-white/5 rounded-2xl p-6 border border-green-500/40 mb-6">
-          <h2 className="text-xl font-semibold text-green-400 mb-3">Resolution</h2>
+          <h2 className="text-xl font-semibold text-green-400 mb-3">Latest Resolution</h2>
           <p><span className="text-gray-400">Decision:</span> <strong>{resolution.decision}</strong></p>
           <p className="mt-1"><span className="text-gray-400">Summary:</span> {resolution.summary}</p>
+          {resolution.is_reassessment && (
+            <p className="mt-2 text-sm text-yellow-400">This is a reassessment</p>
+          )}
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <div className="bg-white/5 rounded-2xl p-6 border border-blue-500/40 mb-6">
+          <h2 className="text-xl font-semibold text-blue-400 mb-3">Decision History</h2>
+          {history.map((h, i) => (
+            <div key={i} className="mb-2 text-sm">
+              #{i + 1}: <strong>{h.decision}</strong> {h.is_reassessment ? '(Reassessment)' : ''} – {h.resolved_at}
+            </div>
+          ))}
         </div>
       )}
 
@@ -237,7 +348,7 @@ export default function App() {
         <div className="bg-white/5 rounded-2xl p-6 border border-orange-500/40">
           <h2 className="text-xl font-semibold text-orange-400 mb-3">Challenge</h2>
           <p><span className="text-gray-400">Reason:</span> {challenge.reason}</p>
-          <p className="mt-1 text-sm text-gray-400">Status changed to "challenged" – can be re-resolved</p>
+          <p className="mt-1 text-sm text-gray-400">Previous Decision: {challenge.previous_decision}</p>
         </div>
       )}
 
