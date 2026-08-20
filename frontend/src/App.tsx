@@ -1,437 +1,156 @@
-import { useState, useEffect } from 'react'
-import { createClient, createAccount } from 'genlayer-js'
-import { studionet } from 'genlayer-js/chains'
-import { TransactionStatus } from 'genlayer-js/types'
+import { useState } from 'react'
 
-// آدرس قرارداد نهایی خودت را اینجا بگذار
 const CONTRACT = '0x8A8B387C84552863c077C3085dF719E6DA42d673'
-
-const account = createAccount()
-const client = createClient({
-  chain: studionet,
-  account,
-})
+const STUDIO_URL = 'https://studio.genlayer.com'
 
 export default function App() {
-  // Form states
-  const [title, setTitle] = useState('Insurance Claim for Car Accident')
-  const [description, setDescription] = useState(
-    'The policyholder was involved in a car accident on 2026-08-15. The other driver was at fault. All documents have been submitted.'
-  )
-  const [evidence, setEvidence] = useState(
-    'https://example.com/police-report.pdf, https://example.com/photos.zip'
-  )
-  const [extraEvidence, setExtraEvidence] = useState('https://example.com/medical-report.pdf')
-  const [challengeReason, setChallengeReason] = useState(
-    'The AI decision did not properly consider the police report that clearly shows the other driver was at fault. Please reassess with more weight on the official documents.'
-  )
+  const [claimId, setClaimId] = useState('0')
 
-  // Data states
-  const [claimId, setClaimId] = useState<number | null>(null)
-  const [claimData, setClaimData] = useState<any>(null)
-  const [resolution, setResolution] = useState<any>(null)
-  const [challenge, setChallenge] = useState<any>(null)
-  const [history, setHistory] = useState<any[]>([])
-  const [stats, setStats] = useState<any>(null)
-
-  // UI states
-  const [status, setStatus] = useState('Initializing...')
-  const [loading, setLoading] = useState(false)
-  const [ready, setReady] = useState(false)
-  const [logs, setLogs] = useState<string[]>([])
-
-  const addLog = (msg: string) => {
-    setLogs(prev => [`[${new Date().toLocaleTimeString()}] ${msg}`, ...prev].slice(0, 12))
-  }
-
-  useEffect(() => {
-    const init = async () => {
-      try {
-        await client.initializeConsensusSmartContract()
-        setReady(true)
-        setStatus('Ready – Start with Step 1')
-        addLog('Client initialized')
-        await loadStats()
-      } catch (err: any) {
-        setStatus('Init failed: ' + (err?.message || String(err)))
-        addLog('Init error: ' + (err?.message || String(err)))
-      }
-    }
-    init()
-  }, [])
-
-  const loadStats = async () => {
-    try {
-      const res = await client.readContract({
-        address: CONTRACT,
-        functionName: 'get_stats',
-        args: [],
-      })
-      setStats(JSON.parse(String(res)))
-    } catch (e) {
-      console.error(e)
-    }
-  }
-
-  // ===== Robust claim ID extraction =====
-  const extractClaimId = async (receipt: any): Promise<number> => {
-    const candidates = [
-      receipt?.executionResult,
-      receipt?.result,
-      receipt?.returnValue,
-      receipt?.data,
-      receipt?.output,
-    ]
-    for (const c of candidates) {
-      if (c !== undefined && c !== null && c !== '') {
-        const n = Number(c)
-        if (!Number.isNaN(n) && n >= 0) return n
-      }
-    }
-    // Fallback
-    const count = await client.readContract({
-      address: CONTRACT,
-      functionName: 'get_claim_count',
-      args: [],
-    })
-    return Math.max(0, Number(count) - 1)
-  }
-
-  // ===== Refresh all data for a claim =====
-  const refreshAll = async (id: number) => {
-    try {
-      const [c, r, ch, h] = await Promise.all([
-        client.readContract({ address: CONTRACT, functionName: 'get_claim', args: [id] }),
-        client.readContract({ address: CONTRACT, functionName: 'get_resolution', args: [id] }),
-        client.readContract({ address: CONTRACT, functionName: 'get_challenge', args: [id] }),
-        client.readContract({ address: CONTRACT, functionName: 'get_history', args: [id] }),
-      ])
-
-      const claim = JSON.parse(String(c) || '{}')
-      const reso = JSON.parse(String(r) || '{}')
-      const chal = JSON.parse(String(ch) || '{}')
-      const hist = JSON.parse(String(h) || '[]')
-
-      setClaimData(Object.keys(claim).length ? claim : null)
-      setResolution(Object.keys(reso).length ? reso : null)
-      setChallenge(Object.keys(chal).length ? chal : null)
-      setHistory(Array.isArray(hist) ? hist : [])
-    } catch (e) {
-      console.error('refreshAll error', e)
-      addLog('Failed to refresh claim data')
-    }
-  }
-
-  // ====================== STEP 1 ======================
-  const createClaim = async () => {
-    if (!title.trim() || !description.trim()) {
-      alert('Title and Description are required')
-      return
-    }
-    setLoading(true)
-    setStatus('Step 1: Creating claim...')
-    addLog('Sending create_claim...')
-    try {
-      await client.initializeConsensusSmartContract()
-      const hash = await client.writeContract({
-        address: CONTRACT,
-        functionName: 'create_claim',
-        args: [title.trim(), description.trim(), evidence.trim() || ''],
-        value: 0n,
-      })
-
-      setStatus('Waiting for FINALIZED...')
-      const receipt = await client.waitForTransactionReceipt({
-        hash,
-        status: TransactionStatus.FINALIZED,
-        retries: 120,
-        interval: 3000,
-      })
-
-      const newId = await extractClaimId(receipt)
-      setClaimId(newId)
-      setStatus(`Step 1 done → Claim ID = ${newId}`)
-      addLog(`Claim created with ID: ${newId}`)
-      await refreshAll(newId)
-      await loadStats()
-    } catch (err: any) {
-      const msg = err?.message || err?.shortMessage || JSON.stringify(err)
-      setStatus('Error: ' + msg)
-      addLog('create_claim error: ' + msg)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // ====================== STEP 2 ======================
-  const addEvidence = async () => {
-    if (claimId === null) return alert('Create a claim first')
-    if (!extraEvidence.trim()) return alert('Enter extra evidence URLs')
-    setLoading(true)
-    setStatus('Step 2: Adding evidence...')
-    addLog('Sending add_evidence...')
-    try {
-      await client.initializeConsensusSmartContract()
-      const hash = await client.writeContract({
-        address: CONTRACT,
-        functionName: 'add_evidence',
-        args: [claimId, extraEvidence.trim()],
-        value: 0n,
-      })
-      await client.waitForTransactionReceipt({
-        hash,
-        status: TransactionStatus.FINALIZED,
-        retries: 80,
-        interval: 3000,
-      })
-      setStatus('Step 2 done – Evidence added')
-      addLog('Evidence added')
-      await refreshAll(claimId)
-    } catch (err: any) {
-      setStatus('Error: ' + (err?.message || String(err)))
-      addLog('add_evidence error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // ====================== STEP 3 & 5 ======================
-  const resolveClaim = async () => {
-    if (claimId === null) return alert('Create a claim first')
-    setLoading(true)
-    setStatus('AI is judging the claim... (30–90 seconds)')
-    addLog('Sending resolve_claim...')
-    try {
-      await client.initializeConsensusSmartContract()
-      const hash = await client.writeContract({
-        address: CONTRACT,
-        functionName: 'resolve_claim',
-        args: [claimId],
-        value: 0n,
-      })
-      await client.waitForTransactionReceipt({
-        hash,
-        status: TransactionStatus.FINALIZED,
-        retries: 180,
-        interval: 4000,
-      })
-
-      await refreshAll(claimId)
-      setStatus('Resolve finished – check results below')
-      addLog('resolve_claim finalized')
-      await loadStats()
-    } catch (err: any) {
-      setStatus('Error: ' + (err?.message || String(err)))
-      addLog('resolve_claim error')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  // ====================== STEP 4 ======================
-  const challengeClaim = async () => {
-    if (claimId === null) return alert('Create a claim first')
-    if (challengeReason.trim().length < 10) return alert('Challenge reason too short')
-    setLoading(true)
-    setStatus('Step 4: Submitting challenge...')
-    addLog('Sending challenge_resolution...')
-    try {
-      await client.initializeConsensusSmartContract()
-      const hash = await client.writeContract({
-        address: CONTRACT,
-        functionName: 'challenge_resolution',
-        args: [claimId, challengeReason.trim()],
-        value: 0n,
-      })
-      await client.waitForTransactionReceipt({
-        hash,
-        status: TransactionStatus.FINALIZED,
-        retries: 80,
-        interval: 3000,
-      })
-
-      await refreshAll(claimId)
-      setStatus('Step 4 done – Challenge submitted. Now run Resolve again (Step 5)')
-      addLog('Challenge submitted')
-    } catch (err: any) {
-      setStatus('Error: ' + (err?.message || String(err)))
-      addLog('challenge error')
-    } finally {
-      setLoading(false)
-    }
+  const copy = (text: string) => {
+    navigator.clipboard.writeText(text)
+    alert('Copied! Paste it in GenLayer Studio.')
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-10">
+    <div className="max-w-3xl mx-auto px-4 py-12 text-white">
       {/* Header */}
-      <div className="text-center mb-8">
-        <h1 className="text-4xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
+      <div className="text-center mb-10">
+        <h1 className="text-4xl md:text-5xl font-bold bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
           ClaimJudge
         </h1>
-        <p className="text-gray-300 mt-1">Full Lifecycle Test (Steps 1–7)</p>
-        <p className="text-xs text-gray-500 mt-1 break-all">{CONTRACT}</p>
+        <p className="text-gray-300 mt-2">AI-Powered Decentralized Claim & Dispute Resolver</p>
+        <p className="text-xs text-gray-500 mt-2 break-all">{CONTRACT}</p>
+        <p className="text-sm text-yellow-400 mt-4">
+          All write & read tests must be performed in{' '}
+          <a href={STUDIO_URL} target="_blank" rel="noreferrer" className="underline font-medium">
+            GenLayer Studio
+          </a>
+        </p>
       </div>
 
-      {/* Stats */}
-      {stats && (
-        <div className="grid grid-cols-3 gap-3 mb-6">
-          <div className="bg-white/5 rounded-xl p-3 text-center border border-white/10">
-            <div className="text-xl font-bold">{stats.total_claims}</div>
-            <div className="text-xs text-gray-400">Total</div>
-          </div>
-          <div className="bg-white/5 rounded-xl p-3 text-center border border-white/10">
-            <div className="text-xl font-bold text-green-400">{stats.resolved_claims}</div>
-            <div className="text-xs text-gray-400">Resolved</div>
-          </div>
-          <div className="bg-white/5 rounded-xl p-3 text-center border border-white/10">
-            <div className="text-xl font-bold text-yellow-400">{stats.open_claims}</div>
-            <div className="text-xs text-gray-400">Open</div>
-          </div>
-        </div>
-      )}
+      {/* Notice */}
+      <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-5 mb-8 text-sm">
+        <p className="font-medium text-yellow-300 mb-2">Important for Reviewers</p>
+        <p className="text-gray-300 leading-relaxed">
+          Due to current browser ↔ Studio RPC limitations, this page is a guided test checklist.  
+          Execute every step in GenLayer Studio and verify the results there using the view methods.
+        </p>
+      </div>
 
-      {/* Current Claim ID */}
-      {claimId !== null && (
-        <div className="bg-indigo-500/20 border border-indigo-500/40 rounded-xl p-3 mb-6 text-center">
-          <span className="text-sm text-gray-300">Current Claim ID:</span>{' '}
-          <span className="text-2xl font-bold text-indigo-300">{claimId}</span>
-        </div>
-      )}
-
-      {/* STEP 1 */}
-      <div className="bg-white/5 rounded-2xl p-5 border border-white/10 mb-5">
-        <h2 className="font-semibold text-indigo-300 mb-3">Step 1 – Create Claim</h2>
+      {/* Claim ID */}
+      <div className="bg-white/5 rounded-2xl p-5 border border-white/10 mb-6">
+        <label className="text-sm text-gray-400">Claim ID you are testing</label>
         <input
-          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 mb-2 text-sm"
-          value={title}
-          onChange={e => setTitle(e.target.value)}
-          placeholder="Title"
+          className="w-full mt-2 bg-black/40 border border-white/10 rounded-xl px-4 py-3"
+          value={claimId}
+          onChange={e => setClaimId(e.target.value)}
+          placeholder="0"
         />
-        <textarea
-          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 mb-2 text-sm"
-          rows={3}
-          value={description}
-          onChange={e => setDescription(e.target.value)}
-          placeholder="Description"
-        />
-        <input
-          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 mb-3 text-sm"
-          value={evidence}
-          onChange={e => setEvidence(e.target.value)}
-          placeholder="Evidence URLs"
-        />
-        <button
-          onClick={createClaim}
-          disabled={loading || !ready}
-          className="w-full bg-gradient-to-r from-indigo-500 to-purple-600 py-2.5 rounded-xl font-medium disabled:opacity-50"
-        >
-          {loading ? 'Processing...' : '1. Create Claim'}
-        </button>
       </div>
 
-      {/* STEP 2 */}
-      <div className="bg-white/5 rounded-2xl p-5 border border-white/10 mb-5">
-        <h2 className="font-semibold text-blue-300 mb-3">Step 2 – Add Evidence</h2>
-        <input
-          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 mb-3 text-sm"
-          value={extraEvidence}
-          onChange={e => setExtraEvidence(e.target.value)}
-          placeholder="Extra evidence URLs"
-        />
-        <button
-          onClick={addEvidence}
-          disabled={loading || claimId === null}
-          className="w-full bg-blue-600 hover:bg-blue-700 py-2.5 rounded-xl font-medium disabled:opacity-50"
-        >
-          2. Add Evidence
-        </button>
-      </div>
+      <div className="space-y-5">
 
-      {/* STEP 3 & 5 */}
-      <div className="bg-white/5 rounded-2xl p-5 border border-white/10 mb-5">
-        <h2 className="font-semibold text-green-300 mb-3">Step 3 & 5 – Resolve / Reassess</h2>
-        <button
-          onClick={resolveClaim}
-          disabled={loading || claimId === null}
-          className="w-full bg-gradient-to-r from-green-500 to-emerald-600 py-2.5 rounded-xl font-medium disabled:opacity-50"
-        >
-          {loading ? 'AI Judging...' : '3 / 5. Resolve Claim (or Reassess)'}
-        </button>
-      </div>
-
-      {/* STEP 4 */}
-      <div className="bg-white/5 rounded-2xl p-5 border border-white/10 mb-5">
-        <h2 className="font-semibold text-orange-300 mb-3">Step 4 – Challenge Resolution</h2>
-        <textarea
-          className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 mb-3 text-sm"
-          rows={3}
-          value={challengeReason}
-          onChange={e => setChallengeReason(e.target.value)}
-          placeholder="Challenge reason"
-        />
-        <button
-          onClick={challengeClaim}
-          disabled={loading || claimId === null}
-          className="w-full bg-orange-600 hover:bg-orange-700 py-2.5 rounded-xl font-medium disabled:opacity-50"
-        >
-          4. Challenge & Request Reassessment
-        </button>
-      </div>
-
-      {/* ================= RESULTS ================= */}
-      {claimData && (
-        <div className="bg-white/5 rounded-2xl p-5 border border-white/10 mb-5">
-          <h2 className="font-semibold text-slate-300 mb-2">Claim Data</h2>
-          <p className="text-sm"><span className="text-gray-400">Status:</span> {claimData.status}</p>
-          <p className="text-sm mt-1"><span className="text-gray-400">Evidence:</span> {claimData.evidence_urls || '—'}</p>
-        </div>
-      )}
-
-      {resolution && (
-        <div className="bg-white/5 rounded-2xl p-5 border border-green-500/40 mb-5">
-          <h2 className="font-semibold text-green-400 mb-2">Latest Resolution</h2>
-          <p><span className="text-gray-400">Decision:</span> <strong className="text-lg">{resolution.decision || '—'}</strong></p>
-          <p className="mt-1 text-sm"><span className="text-gray-400">Summary:</span> {resolution.summary || '—'}</p>
-          {resolution.is_reassessment && (
-            <div className="mt-2 text-sm text-yellow-300">
-              <p>Reassessment: true</p>
-              <p>Previous Decision: {resolution.previous_decision || '—'}</p>
-              <p>Challenge Reason: {resolution.challenge_reason || '—'}</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {challenge && (
-        <div className="bg-white/5 rounded-2xl p-5 border border-orange-500/40 mb-5">
-          <h2 className="font-semibold text-orange-400 mb-2">Challenge</h2>
-          <p className="text-sm"><span className="text-gray-400">Reason:</span> {challenge.reason || '—'}</p>
-          <p className="text-sm mt-1"><span className="text-gray-400">Previous Decision:</span> {challenge.previous_decision || '—'}</p>
-        </div>
-      )}
-
-      {history.length > 0 && (
-        <div className="bg-white/5 rounded-2xl p-5 border border-blue-500/40 mb-5">
-          <h2 className="font-semibold text-blue-400 mb-2">Decision History (Step 6)</h2>
-          {history.map((h, i) => (
-            <div key={i} className="text-sm mb-1">
-              #{i + 1}: <strong>{h.decision}</strong>
-              {h.is_reassessment ? ' (Reassessment)' : ''} – {h.resolved_at}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Status + Logs */}
-      <div className="mt-6 text-center">
-        <p className="text-sm text-gray-300 mb-3">{status}</p>
-        {logs.length > 0 && (
-          <div className="bg-black/40 rounded-xl p-3 text-left text-xs text-gray-400 max-h-40 overflow-y-auto">
-            {logs.map((l, i) => (
-              <div key={i}>{l}</div>
-            ))}
+        {/* Step 1 */}
+        <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
+          <h2 className="font-semibold text-indigo-300 mb-3">Step 1 – create_claim</h2>
+          <div className="bg-black/40 p-4 rounded-xl text-xs space-y-1 mb-3 overflow-hidden">
+            <p><span className="text-gray-400">title:</span> Insurance Claim for Car Accident</p>
+            <p><span className="text-gray-400">description:</span> The policyholder was involved in a car accident on 2026-08-15. The other driver was at fault. All documents have been submitted.</p>
+            <p><span className="text-gray-400">evidence_urls:</span> https://example.com/police-report.pdf, https://example.com/photos.zip</p>
           </div>
-        )}
+          <button
+            onClick={() => copy(`Insurance Claim for Car Accident\nThe policyholder was involved in a car accident on 2026-08-15. The other driver was at fault. All documents have been submitted.\nhttps://example.com/police-report.pdf, https://example.com/photos.zip`)}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 py-2.5 rounded-xl text-sm font-medium"
+          >
+            Copy Parameters
+          </button>
+          <p className="text-xs text-gray-500 mt-2">→ Note the returned claim_id</p>
+        </div>
+
+        {/* Step 2 */}
+        <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
+          <h2 className="font-semibold text-blue-300 mb-3">Step 2 – add_evidence</h2>
+          <div className="bg-black/40 p-4 rounded-xl text-xs space-y-1 mb-3">
+            <p><span className="text-gray-400">claim_id:</span> {claimId}</p>
+            <p><span className="text-gray-400">extra_urls:</span> https://example.com/medical-report.pdf</p>
+          </div>
+          <button
+            onClick={() => copy(`${claimId}\nhttps://example.com/medical-report.pdf`)}
+            className="w-full bg-blue-600 hover:bg-blue-700 py-2.5 rounded-xl text-sm font-medium"
+          >
+            Copy Parameters
+          </button>
+        </div>
+
+        {/* Step 3 */}
+        <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
+          <h2 className="font-semibold text-green-300 mb-3">Step 3 – resolve_claim (first judgment)</h2>
+          <div className="bg-black/40 p-4 rounded-xl text-xs mb-3">
+            <p><span className="text-gray-400">claim_id:</span> {claimId}</p>
+          </div>
+          <button
+            onClick={() => copy(claimId)}
+            className="w-full bg-green-600 hover:bg-green-700 py-2.5 rounded-xl text-sm font-medium"
+          >
+            Copy claim_id
+          </button>
+          <p className="text-xs text-gray-500 mt-2">After FINALIZED → call get_resolution</p>
+        </div>
+
+        {/* Step 4 */}
+        <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
+          <h2 className="font-semibold text-orange-300 mb-3">Step 4 – challenge_resolution</h2>
+          <div className="bg-black/40 p-4 rounded-xl text-xs space-y-1 mb-3 overflow-hidden">
+            <p><span className="text-gray-400">claim_id:</span> {claimId}</p>
+            <p className="leading-relaxed">
+              <span className="text-gray-400">reason:</span> The AI decision did not properly consider the police report that clearly shows the other driver was at fault. Please reassess with more weight on the official documents.
+            </p>
+          </div>
+          <button
+            onClick={() => copy(`${claimId}\nThe AI decision did not properly consider the police report that clearly shows the other driver was at fault. Please reassess with more weight on the official documents.`)}
+            className="w-full bg-orange-600 hover:bg-orange-700 py-2.5 rounded-xl text-sm font-medium"
+          >
+            Copy Parameters
+          </button>
+        </div>
+
+        {/* Step 5 */}
+        <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
+          <h2 className="font-semibold text-yellow-300 mb-3">Step 5 – resolve_claim again (Reassessment)</h2>
+          <div className="bg-black/40 p-4 rounded-xl text-xs mb-3">
+            <p><span className="text-gray-400">claim_id:</span> {claimId}</p>
+          </div>
+          <button
+            onClick={() => copy(claimId)}
+            className="w-full bg-yellow-600 hover:bg-yellow-700 py-2.5 rounded-xl text-sm font-medium"
+          >
+            Copy claim_id
+          </button>
+          <p className="text-xs text-gray-500 mt-2">AI must receive previous decision + challenge reason</p>
+        </div>
+
+        {/* Step 6 & 7 */}
+        <div className="bg-white/5 rounded-2xl p-5 border border-white/10">
+          <h2 className="font-semibold text-purple-300 mb-3">Step 6 & 7 – Verify Results in Studio</h2>
+          <ul className="text-sm text-gray-300 space-y-2 list-disc list-inside leading-relaxed">
+            <li><code>get_resolution</code> → must show <strong>is_reassessment: true</strong></li>
+            <li><code>get_challenge</code> → must show the challenge reason</li>
+            <li><code>get_history</code> → must contain at least 2 decisions</li>
+            <li><code>get_claim</code> → status = resolved</li>
+            <li><code>get_stats</code> → overall statistics</li>
+          </ul>
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="mt-12 text-center text-sm text-gray-500">
+        <a href={STUDIO_URL} target="_blank" rel="noreferrer" className="text-indigo-400 underline">
+          Open GenLayer Studio
+        </a>
+        {' • '}
+        <a href="https://github.com/Aragoorn/genlayer-claimjudge-dapp" target="_blank" rel="noreferrer" className="text-indigo-400 underline">
+          GitHub Repository
+        </a>
       </div>
     </div>
   )
