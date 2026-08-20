@@ -4,7 +4,7 @@
 <img width="1920" height="878" alt="Screenshot (2780)" src="https://github.com/user-attachments/assets/f2f489d8-ef21-4181-a2ef-df345ac75b0f" />
 <img width="1920" height="888" alt="Screenshot (2779)" src="https://github.com/user-attachments/assets/fff77032-0b1d-405f-b7cc-90b4e3c16326" />
 <img width="1920" height="869" alt="Screenshot (2778)" src="https://github.com/user-attachments/assets/d20d7157-9ee3-4fa0-a73e-4ec1a93d74e3" />
-
+<img width="1920" height="890" alt="Screenshot (2796)" src="https://github.com/user-attachments/assets/a1945e4e-1cf8-4786-8bd8-5495e386cb06" />
 # ClaimJudge – AI-Powered Decentralized Claim & Dispute Resolver
 
 **Final version – Fully compliant with steward feedback**
@@ -18,7 +18,8 @@ https://explorer-studio.genlayer.com/tx/0x38c1fea49cb5c9aeeea1e16f7320ec65ae9d21
 https://explorer-studio.genlayer.com/tx/0xf9fab74f4827f03bfc4c891d85b89141212ede63e51d535dcb5b6164ac0bfe13
 https://explorer-studio.genlayer.com/tx/0xf830d907987c58994814400366ae9655e6f415a5f5aebafa0c32fd5222c77816
 
-
+## live demo 
+https://aesthetic-longma-6e391d.netlify.app/
 
 
 ## Steward Feedback Compliance
