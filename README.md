@@ -9,7 +9,7 @@
 <img width="1920" height="890" alt="Screenshot (2796)" src="https://github.com/user-attachments/assets/a1945e4e-1cf8-4786-8bd8-5495e386cb06" />
 # ClaimJudge – AI-Powered Decentralized Claim & Dispute Resolver
 
-**Final version – Fully compliant with steward feedback**
+**Final version – Fully compliant with steward feedback** 
 
 ## Overview
 
